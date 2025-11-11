@@ -19,7 +19,7 @@ def welcome():
 
 
 # 🟢 Create (POST)
-@app.post("/users/")
+@app.post("/create/")
 def create_user(username: str, email: str, full_name: str = None):
     with get_db_connection() as conn:
         try:
@@ -49,3 +49,43 @@ def read_user(user_id: int):
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
         return dict(user)
+
+@app.put("/update/{user_id}")
+def update_user(user_id: int, username: str = None, email: str = None, full_name: str = None):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Update only provided fields
+        updates = []
+        params = []
+        if username:
+            updates.append("username = ?")
+            params.append(username)
+        if email:
+            updates.append("email = ?")
+            params.append(email)
+        if full_name:
+            updates.append("full_name = ?")
+            params.append(full_name)
+
+        if updates:
+            params.append(user_id)
+            sql = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+            cur.execute(sql, tuple(params))
+            conn.commit()
+
+        return {"message": "User updated successfully"}
+
+# 🔴 Delete (DELETE)
+@app.delete("/delete/{user_id}")
+def delete_user(user_id: int):
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        return {"message": "User deleted successfully"}
