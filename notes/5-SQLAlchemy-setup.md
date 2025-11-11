@@ -1,182 +1,127 @@
----
+# FastAPI Users — 8 Progressive Versions (mini → mega)
 
-# 🧠 FastAPI Journey – Day 8–9: SQLAlchemy Setup & CRUD API
-
----
-
-## 🎯 **Goal of These Days**
-
-You’ll learn to:
-
-* Connect FastAPI with a real database.
-* Use **SQLAlchemy ORM** to model your data (like `User`).
-* Use **Alembic** for database migrations.
-* Build **complete CRUD APIs** for `/users`.
+This document contains **8 incremental versions** of the single-file FastAPI Users app to practise from minimal to production-ready (mega). Each version builds on the previous one. For each version you'll find: **code**, **what changed**, **how to run**, and **practice tasks**.
 
 ---
 
-## 🧩 Why SQLAlchemy?
+## Version 1 — `v1_minimal.py`
 
-> **SQLAlchemy** = SQL + ORM + Power.
-
-It is both:
-
-1. **Core SQL toolkit** (low-level queries), and
-2. **ORM (Object Relational Mapper)** — allows Python classes ↔ SQL tables mapping.
-
-As an **AI Engineer**, you’ll use databases for:
-
-* Storing users, API logs, model predictions, dataset metadata, etc.
-* Managing experiments and results (think MLOps tools like MLflow).
-
----
-
-## 🧱 Step 1: Install Required Packages
-
-```bash
-pip install sqlalchemy alembic psycopg2-binary
-```
-
-> Use `sqlite` for learning (lightweight, no setup).
-
----
-
-## ⚙️ Step 2: Create Project Structure
-
-```
-fastapi_app/
-│
-├── main.py
-├── database.py
-├── models.py
-├── schemas.py
-└── crud.py
-```
-
----
-
-## 🧩 Step 3: Configure Database Connection (`database.py`)
+**Goal:** Tiny FastAPI app with one route. Understand `uvicorn` and basic route flow.
 
 ```python
+# v1_minimal.py
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello FastAPI - v1 minimal"}
+```
+
+**Run:** `uvicorn v1_minimal:app --reload`
+
+**Practice:** Add `GET /health` returning `status: ok`.
+
+---
+
+## Version 2 — `v2_db_engine_base.py`
+
+**Goal:** Add SQLAlchemy engine, sessionmaker, and `Base`. No models yet. Learn connection string.
+
+```python
+# v2_db_engine_base.py
+from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# SQLite URL (you can switch to PostgreSQL later)
 SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
-
-# Connect to database
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-
-# Create session
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base class for ORM models
 Base = declarative_base()
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Engine ready - v2"}
 ```
 
-### 💡 Explanation:
+**Run:** `uvicorn v2_db_engine_base:app --reload`
 
-* `create_engine()` → connects SQLAlchemy to DB.
-* `SessionLocal()` → handles transactions (open, commit, close).
-* `Base` → parent for all your models.
+**Practice:** Create a dependency `get_db()` that yields a session and closes it.
 
 ---
 
-## 🧍‍♂️ Step 4: Create User Model (`models.py`)
+## Version 3 — `v3_user_model.py`
+
+**Goal:** Define a `User` SQLAlchemy model and create tables.
 
 ```python
-from sqlalchemy import Column, Integer, String
-from .database import Base
+# v3_user_model.py
+from fastapi import FastAPI
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 class User(Base):
     __tablename__ = "users"
-
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False)
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "User model ready - v3"}
 ```
 
-### 🧠 ORM Concept:
+**Run:** `uvicorn v3_user_model:app --reload`
 
-Each `User` object maps to a **row in the `users` table.**
-Each **attribute** → column in the table.
+**Practice:** Open Python REPL and use `SessionLocal()` to create and query a `User` row.
 
 ---
 
-## 📦 Step 5: Create Schemas (Pydantic Models) (`schemas.py`)
+## Version 4 — `v4_create_user_route.py`
 
-These define **data validation** for API requests & responses.
+**Goal:** Add Pydantic schemas and `POST /users` to create users via API.
 
 ```python
+# v4_create_user_route.py
+from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 
-class UserBase(BaseModel):
+SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+
+Base.metadata.create_all(bind=engine)
+
+class UserCreate(BaseModel):
     name: str
     email: EmailStr
 
-class UserCreate(UserBase):
-    password: str
+app = FastAPI()
 
-class UserResponse(UserBase):
-    id: int
-
-    class Config:
-        orm_mode = True
-```
-
-### 💡 Why `orm_mode = True`?
-
-So FastAPI can convert SQLAlchemy models → JSON responses easily.
-
----
-
-## 🧰 Step 6: CRUD Operations (`crud.py`)
-
-```python
-from sqlalchemy.orm import Session
-from . import models, schemas
-
-def get_users(db: Session):
-    return db.query(models.User).all()
-
-def get_user(db: Session, user_id: int):
-    return db.query(models.User).filter(models.User.id == user_id).first()
-
-def create_user(db: Session, user: schemas.UserCreate):
-    db_user = models.User(name=user.name, email=user.email, password=user.password)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
-
-def delete_user(db: Session, user_id: int):
-    db_user = db.query(models.User).filter(models.User.id == user_id).first()
-    if db_user:
-        db.delete(db_user)
-        db.commit()
-    return db_user
-```
-
----
-
-## 🚀 Step 7: Connect Everything in `main.py`
-
-```python
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
-from . import models, schemas, crud
-from .database import SessionLocal, engine
-
-# Create tables
-models.Base.metadata.create_all(bind=engine)
-
-app = FastAPI(title="Users CRUD API")
-
-# Dependency - creates & closes DB session automatically
 def get_db():
     db = SessionLocal()
     try:
@@ -184,123 +129,258 @@ def get_db():
     finally:
         db.close()
 
-
-@app.post("/users/", response_model=schemas.UserResponse)
-def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    return crud.create_user(db=db, user=user)
-
-
-@app.get("/users/", response_model=list[schemas.UserResponse])
-def get_all_users(db: Session = Depends(get_db)):
-    return crud.get_users(db)
-
-
-@app.get("/users/{user_id}", response_model=schemas.UserResponse)
-def get_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    user = crud.get_user(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
-
-
-@app.delete("/users/{user_id}", response_model=schemas.UserResponse)
-def delete_user_by_id(user_id: int, db: Session = Depends(get_db)):
-    user = crud.delete_user(db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+@app.post("/users", status_code=201)
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == user.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    db_user = User(name=user.name, email=user.email)
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return {"id": db_user.id, "name": db_user.name, "email": db_user.email}
 ```
+
+**Run:** `uvicorn v4_create_user_route:app --reload`
+
+**Practice:** Use Swagger UI `http://127.0.0.1:8000/docs` to create users.
 
 ---
 
-## ⚡ Step 8: Run the App
+## Version 5 — `v5_full_crud.py`
 
-```bash
-uvicorn fastapi_app.main:app --reload
-```
-
-✅ Open your browser → `http://127.0.0.1:8000/docs`
-
-You can now:
-
-* `POST /users` → Create a new user
-* `GET /users` → List all users
-* `GET /users/{id}` → Fetch by ID
-* `DELETE /users/{id}` → Delete user
-
----
-
-## 🧩 Step 9: Database Migrations with Alembic
-
-### Why Alembic?
-
-When your model changes (e.g., adding a new column), Alembic handles **DB schema versioning** safely — no manual edits.
-
-### Setup Alembic
-
-```bash
-alembic init alembic
-```
-
-### Edit `alembic.ini`
-
-Change:
-
-```
-sqlalchemy.url = sqlite:///./users.db
-```
-
-### Edit `alembic/env.py`
-
-Add:
+**Goal:** Full CRUD routes: create, read all, read by id, update, delete. Add response models.
 
 ```python
-from fastapi_app.database import Base
-from fastapi_app.models import *
-target_metadata = Base.metadata
+# v5_full_crud.py
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel, EmailStr
+from typing import List, Optional
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+
+Base.metadata.create_all(bind=engine)
+
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    email: EmailStr
+    class Config:
+        orm_mode = True
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+app = FastAPI()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.post("/users/", response_model=UserResponse, status_code=201)
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    db_user = User(name=user.name, email=user.email)
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+@app.get("/users/", response_model=List[UserResponse])
+def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    return db.query(User).offset(skip).limit(limit).all()
+
+@app.get("/users/{user_id}", response_model=UserResponse)
+def read_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+@app.put("/users/{user_id}", response_model=UserResponse)
+def update_user(user_id: int, user_in: UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user_in.name is not None:
+        user.name = user_in.name
+    if user_in.email is not None:
+        if db.query(User).filter(User.email == user_in.email).first():
+            raise HTTPException(status_code=400, detail="Email already in use")
+        user.email = user_in.email
+    db.commit()
+    db.refresh(user)
+    return user
+
+@app.delete("/users/{user_id}", response_model=UserResponse)
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return user
 ```
 
-### Run Migrations
+**Run:** `uvicorn v5_full_crud:app --reload`
 
-```bash
-alembic revision --autogenerate -m "create users table"
-alembic upgrade head
+**Practice:** Add unit tests using `TestClient` to verify endpoints.
+
+---
+
+## Version 6 — `v6_auth_hashing.py`
+
+**Goal:** Add password hashing with `passlib` and a simple `/login` endpoint (no JWT yet). Store `hashed_password`.
+
+```python
+# v6_auth_hashing.py
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel, EmailStr
+from passlib.context import CryptContext
+from typing import List, Optional
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+
+Base.metadata.create_all(bind=engine)
+
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+app = FastAPI()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+@app.post("/users/", status_code=201)
+def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    db_user = User(name=user.name, email=user.email, hashed_password=get_password_hash(user.password))
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return {"id": db_user.id, "name": db_user.name, "email": db_user.email}
+
+@app.post("/login/")
+def login(data: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not verify_password(data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    return {"id": user.id, "email": user.email, "name": user.name}
 ```
 
----
+**Run:** `uvicorn v6_auth_hashing:app --reload`
 
-## 🧠 Deep Insights (AI Engineer’s Perspective)
-
-| Concept                  | Why It Matters in AI/ML Apps                                                      |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| **SQLAlchemy ORM**       | Use it to store experiment results, hyperparameters, or fine-tuned model metrics. |
-| **Alembic migrations**   | Track schema changes over ML lifecycle (new dataset columns, new metadata).       |
-| **FastAPI CRUD**         | Easily build internal APIs for model management or dataset tracking dashboards.   |
-| **Database abstraction** | Switch between SQLite (local), PostgreSQL (cloud), or MySQL seamlessly.           |
+**Practice:** Attempt login with correct & incorrect passwords; inspect DB file to confirm hashed password.
 
 ---
 
-## 🧪 Practice Ideas
+## Version 7 — `v7_pagination_validation.py`
 
-1. Add `update_user` route (PUT).
-2. Add column `role: str` in `User` and apply Alembic migration.
-3. Secure passwords using `bcrypt`.
-4. Integrate with **JWT Auth** (Day 10 topic).
-5. Replace SQLite with PostgreSQL (for production/AI pipelines).
+**Goal:** Add pagination, input validation, improved error responses, and basic logging.
 
----
+Key changes:
 
-## 🧾 Summary Cheat Sheet
+* Add `skip`/`limit` to list users (already present in v5 but now with validation).
+* Use `limit` max clamp to 100.
+* Add `logging` statements and structured error messages.
 
-| Step | File          | Purpose                             |
-| ---- | ------------- | ----------------------------------- |
-| 1️⃣  | `database.py` | DB connection & Base                |
-| 2️⃣  | `models.py`   | ORM models                          |
-| 3️⃣  | `schemas.py`  | Pydantic validation                 |
-| 4️⃣  | `crud.py`     | Logic for Create/Read/Update/Delete |
-| 5️⃣  | `main.py`     | API routes                          |
-| 6️⃣  | Alembic       | Database migrations                 |
+**Practice:** Introduce `fastapi.exceptions.RequestValidationError` handling to return custom JSON errors.
 
 ---
 
+## Version 8 (Mega) — `v8_mega.py`
+
+**Goal:** Production-style single file with:
+
+* Dependency `get_db`
+* CRUD functions separated from route handlers
+* Password hashing + login
+* Response models + validation
+* CORS (optional), simple settings via `pydantic` `BaseSettings`
+* Notes for Alembic, Dockerfile, and JWT integration (snippets)
+
+> This mega file combines everything you've practised. Use it to understand the full workflow before splitting into modules.
+
+**Practice tasks for mega:**
+
+1. Split the mega file into modules: `database.py`, `models.py`, `schemas.py`, `crud.py`, `main.py`.
+2. Add Alembic and create initial migration.
+3. Implement JWT auth and protect `/users` endpoints.
+4. Write pytest tests for all endpoints and CI using GitHub Actions.
+
+---
+
+# How to Practise (Suggested progression)
+
+1. Start with **v1**, run it, and add the tiny health endpoint.
+2. Move to **v2**, implement `get_db()` dependency.
+3. Continue to **v3** and inspect DB file after `create_all()` runs.
+4. Use **v4** to learn request validation and how Swagger generates a form.
+5. Use **v5** to learn full CRUD behavior and response models (`orm_mode`).
+6. Use **v6** to learn hashing and login flow.
+7. Use **v7** for validation & logging improvements.
+8. Finish with **v8** (mega) and then **refactor** into modules and add Alembic/JWT.
+
+# Tips & Best Practices
+
+* Always close DB sessions.
+* Never store plain-text passwords.
+* Use Alembic for migrations in real projects.
+* Write tests and CI early.
+* Use environment variables for secrets (do not hardcode DB credentials).
+
+---
 
